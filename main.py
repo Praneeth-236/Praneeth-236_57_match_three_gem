@@ -25,10 +25,10 @@ def main():
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_r:
                 engine.reset()
 
-        engine.update()
+        dt = clock.tick(FPS) / 1000.0
+        engine.update(dt)
         engine.render(screen)
         pygame.display.flip()
-        clock.tick(FPS)
 
     pygame.quit()
     sys.exit()

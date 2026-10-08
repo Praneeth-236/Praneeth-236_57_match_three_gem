@@ -3,6 +3,8 @@ from game.board import Board, GRID_SIZE, TILE_SIZE
 
 
 class GameEngine:
+    IDLE_HINT_DELAY = 5.0
+
     def __init__(self, width, height):
         self.width = width
         self.height = height
@@ -10,19 +12,23 @@ class GameEngine:
         offset_y = (height - (GRID_SIZE * TILE_SIZE)) // 2 + 30
 
         self.board = Board(offset_x, offset_y, target_score=500, max_moves=20)
+        self.idle_time = 0.0
+        self.hint_move = None
+        self.hint_phase = 0.0
 
         self.font_big = pygame.font.SysFont(None, 48)
         self.font_small = pygame.font.SysFont(None, 24)
 
     def handle_click(self, mouse_pos):
-        if self.board.is_game_over() or self.board.is_animating():
-            return
-
         mx, my = mouse_pos
         bx = mx - self.board.offset_x
         by = my - self.board.offset_y
 
         if 0 <= bx < GRID_SIZE * TILE_SIZE and 0 <= by < GRID_SIZE * TILE_SIZE:
+            self.reset_idle_hint()
+            if self.board.is_game_over() or self.board.is_animating():
+                return
+
             col = int(bx // TILE_SIZE)
             row = int(by // TILE_SIZE)
 
@@ -38,9 +44,22 @@ class GameEngine:
 
     def reset(self):
         self.board.reset()
+        self.reset_idle_hint()
 
-    def update(self):
+    def reset_idle_hint(self):
+        self.idle_time = 0.0
+        self.hint_move = None
+
+    def update(self, dt=1 / 60):
         self.board.update()
+        if self.board.is_animating() or self.board.is_game_over():
+            self.reset_idle_hint()
+            return
+
+        self.idle_time += dt
+        self.hint_phase = (self.hint_phase + dt * 2) % 2
+        if self.idle_time >= self.IDLE_HINT_DELAY and self.hint_move is None:
+            self.hint_move = self.board.find_valid_swap()
 
     def render(self, screen):
         screen.fill((32, 34, 40))
@@ -54,7 +73,7 @@ class GameEngine:
         hud_surf = self.font_small.render(hud_text, True, (80, 220, 180))
         screen.blit(hud_surf, (self.width // 2 - hud_surf.get_width() // 2, 55))
 
-        self.board.render(screen)
+        self.board.render(screen, self.hint_move, abs(self.hint_phase - 1))
 
         inst_surf = self.font_small.render(
             "Swap gems to match 3+. Press [R] to Restart.",

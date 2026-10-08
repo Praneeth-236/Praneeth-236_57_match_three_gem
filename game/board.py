@@ -97,6 +97,28 @@ class Board:
         r2, c2 = pos2
         return abs(r1 - r2) + abs(c1 - c2) == 1
 
+    def find_valid_swap(self):
+        for r in range(GRID_SIZE):
+            for c in range(GRID_SIZE):
+                for next_position in ((r, c + 1), (r + 1, c)):
+                    next_row, next_col = next_position
+                    if next_row >= GRID_SIZE or next_col >= GRID_SIZE:
+                        continue
+
+                    first_gem = self.grid[r][c]
+                    second_gem = self.grid[next_row][next_col]
+                    if isinstance(first_gem, BombGem) or isinstance(second_gem, BombGem):
+                        return (r, c), next_position
+
+                    self.grid[r][c], self.grid[next_row][next_col] = second_gem, first_gem
+                    creates_match = bool(self.find_matches())
+                    self.grid[r][c], self.grid[next_row][next_col] = first_gem, second_gem
+
+                    if creates_match:
+                        return (r, c), next_position
+
+        return None
+
     def find_matches(self):
         matched = set()
 
@@ -282,7 +304,7 @@ class Board:
                 if self.grid[r][c]:
                     self.grid[r][c].update()
 
-    def render(self, surface):
+    def render(self, surface, hint_move=None, hint_phase=0):
         board_rect = pygame.Rect(
             self.offset_x, self.offset_y, GRID_SIZE * TILE_SIZE, GRID_SIZE * TILE_SIZE
         )
@@ -324,3 +346,11 @@ class Board:
                     pygame.draw.rect(
                         surface, (255, 255, 255), sel_rect, width=4, border_radius=10
                     )
+
+        if hint_move:
+            hint_color = (100 + int(80 * hint_phase), 240, 220)
+            for r, c in hint_move:
+                hint_x = self.offset_x + c * TILE_SIZE
+                hint_y = self.offset_y + r * TILE_SIZE
+                hint_rect = pygame.Rect(hint_x + 5, hint_y + 5, TILE_SIZE - 10, TILE_SIZE - 10)
+                pygame.draw.rect(surface, hint_color, hint_rect, width=3, border_radius=10)
