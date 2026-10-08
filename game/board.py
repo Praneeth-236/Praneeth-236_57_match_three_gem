@@ -44,12 +44,14 @@ class Board:
         self.selected = None
         self.score = 0
         self.moves_remaining = max_moves
+        self.combo_count = 0
         self.reset()
 
     def reset(self):
         self.score = 0
         self.moves_remaining = self.max_moves
         self.selected = None
+        self.combo_count = 0
         for r in range(GRID_SIZE):
             for c in range(GRID_SIZE):
                 color = random.choice(GEM_COLORS)
@@ -132,16 +134,20 @@ class Board:
                 gem.current_y = -((empty_slots - r) * TILE_SIZE)
                 self.grid[r][c] = gem
 
-    def resolve_matches(self):
+    def resolve_matches(self, score_matches=False):
         total_cleared = 0
         while True:
             matches = self.find_matches()
             if not matches:
                 break
+            self.combo_count += 1
             total_cleared += len(matches)
+            if score_matches:
+                self.score += len(matches) * 10 * self.combo_count
             for r, c in matches:
                 self.grid[r][c] = None
             self.drop_and_refill()
+        self.combo_count = 0
         return total_cleared
 
     def process_swap(self, pos1, pos2):
@@ -156,8 +162,8 @@ class Board:
             return False
 
         self.moves_remaining -= 1
-        cleared = self.resolve_matches()
-        self.score += cleared * 10
+        self.combo_count = 0
+        self.resolve_matches(score_matches=True)
         return True
 
     def is_game_over(self):
