@@ -33,6 +33,13 @@ class Gem:
         return self.current_y < self.target_y
 
 
+class BombGem(Gem):
+
+    def __init__(self, color, target_row, col, direction):
+        super().__init__(color, target_row, col)
+        self.direction = direction
+
+
 class Board:
 
     def __init__(self, offset_x, offset_y, target_score=500, max_moves=20):
@@ -96,9 +103,9 @@ class Board:
         for r in range(GRID_SIZE):
             for c in range(GRID_SIZE - 2):
                 if (
-                    self.grid[r][c]
-                    and self.grid[r][c + 1]
-                    and self.grid[r][c + 2]
+                    self._matchable(self.grid[r][c])
+                    and self._matchable(self.grid[r][c + 1])
+                    and self._matchable(self.grid[r][c + 2])
                     and self.grid[r][c].color == self.grid[r][c + 1].color == self.grid[r][c + 2].color
                 ):
                     matched.update([(r, c), (r, c + 1), (r, c + 2)])
@@ -106,14 +113,69 @@ class Board:
         for r in range(GRID_SIZE - 2):
             for c in range(GRID_SIZE):
                 if (
-                    self.grid[r][c]
-                    and self.grid[r + 1][c]
-                    and self.grid[r + 2][c]
+                    self._matchable(self.grid[r][c])
+                    and self._matchable(self.grid[r + 1][c])
+                    and self._matchable(self.grid[r + 2][c])
                     and self.grid[r][c].color == self.grid[r + 1][c].color == self.grid[r + 2][c].color
                 ):
                     matched.update([(r, c), (r + 1, c), (r + 2, c)])
 
         return matched
+
+    def _matchable(self, gem):
+        return gem is not None and not isinstance(gem, BombGem)
+
+    def find_four_match(self, matches, swap_positions):
+        matched = set(matches)
+
+        for r in range(GRID_SIZE):
+            for start in range(GRID_SIZE - 3):
+                positions = [(r, start + offset) for offset in range(4)]
+                if self._is_exact_four(positions, matched) and any(
+                    position in positions for position in swap_positions
+                ):
+                    return positions, "horizontal"
+
+        for c in range(GRID_SIZE):
+            for start in range(GRID_SIZE - 3):
+                positions = [(start + offset, c) for offset in range(4)]
+                if self._is_exact_four(positions, matched) and any(
+                    position in positions for position in swap_positions
+                ):
+                    return positions, "vertical"
+
+        return None
+
+    def _is_exact_four(self, positions, matched):
+        if not set(positions).issubset(matched):
+            return False
+
+        gems = [self.grid[r][c] for r, c in positions]
+        if not all(self._matchable(gem) for gem in gems):
+            return False
+        if len({gem.color for gem in gems}) != 1:
+            return False
+
+        start_row, start_col = positions[0]
+        end_row, end_col = positions[-1]
+        color = gems[0].color
+
+        if start_row == end_row:
+            if start_col > 0 and self._matchable(self.grid[start_row][start_col - 1]) \
+                    and self.grid[start_row][start_col - 1].color == color:
+                return False
+            if end_col + 1 < GRID_SIZE and self._matchable(self.grid[end_row][end_col + 1]) \
+                    and self.grid[end_row][end_col + 1].color == color:
+                return False
+        else:
+            if start_row > 0 and self._matchable(self.grid[start_row - 1][start_col]) \
+                    and self.grid[start_row - 1][start_col].color == color:
+                return False
+            if end_row + 1 < GRID_SIZE and self._matchable(self.grid[end_row + 1][end_col]) \
+                    and self.grid[end_row + 1][end_col].color == color:
+                return False
+
+        return True
 
     def drop_and_refill(self):
         for c in range(GRID_SIZE):
@@ -134,17 +196,32 @@ class Board:
                 gem.current_y = -((empty_slots - r) * TILE_SIZE)
                 self.grid[r][c] = gem
 
-    def resolve_matches(self, score_matches=False):
+    def resolve_matches(self, score_matches=False, bomb_info=None, initial_clear=None):
         total_cleared = 0
+        pending_clear = set(initial_clear or ())
         while True:
-            matches = self.find_matches()
+            matches = pending_clear or self.find_matches()
+            pending_clear = set()
             if not matches:
                 break
             self.combo_count += 1
             total_cleared += len(matches)
             if score_matches:
                 self.score += len(matches) * 10 * self.combo_count
-            for r, c in matches:
+            clear_positions = set(matches)
+            if bomb_info:
+                bomb_position, direction = bomb_info
+                if bomb_position in matches:
+                    r, c = bomb_position
+                    gem = self.grid[r][c]
+                    if self._matchable(gem):
+                        bomb = BombGem(gem.color, r, c, direction)
+                        bomb.current_y = gem.current_y
+                        bomb.target_y = gem.target_y
+                        self.grid[r][c] = bomb
+                        clear_positions.remove(bomb_position)
+                bomb_info = None
+            for r, c in clear_positions:
                 self.grid[r][c] = None
             self.drop_and_refill()
         self.combo_count = 0
@@ -155,6 +232,23 @@ class Board:
             return False
 
         self.swap_gems(pos1, pos2)
+        swapped_bomb = None
+        for position in (pos1, pos2):
+            if isinstance(self.grid[position[0]][position[1]], BombGem):
+                swapped_bomb = self.grid[position[0]][position[1]]
+                break
+
+        if swapped_bomb:
+            row, col = pos1 if self.grid[pos1[0]][pos1[1]] is swapped_bomb else pos2
+            if swapped_bomb.direction == "horizontal":
+                initial_clear = {(row, c) for c in range(GRID_SIZE)}
+            else:
+                initial_clear = {(r, col) for r in range(GRID_SIZE)}
+            self.moves_remaining -= 1
+            self.combo_count = 0
+            self.resolve_matches(score_matches=True, initial_clear=initial_clear)
+            return True
+
         matches = self.find_matches()
 
         if not matches:
@@ -163,7 +257,13 @@ class Board:
 
         self.moves_remaining -= 1
         self.combo_count = 0
-        self.resolve_matches(score_matches=True)
+        bomb_match = self.find_four_match(matches, (pos1, pos2))
+        bomb_info = None
+        if bomb_match:
+            positions, direction = bomb_match
+            bomb_position = pos1 if pos1 in positions else pos2
+            bomb_info = (bomb_position, direction)
+        self.resolve_matches(score_matches=True, bomb_info=bomb_info)
         return True
 
     def is_game_over(self):
@@ -201,6 +301,21 @@ class Board:
                     pygame.draw.rect(
                         surface, (255, 255, 255), tile_rect, width=1, border_radius=10
                     )
+                    if isinstance(gem, BombGem):
+                        center = tile_rect.center
+                        pygame.draw.circle(surface, (255, 255, 255), center, 18, width=3)
+                        if gem.direction == "horizontal":
+                            pygame.draw.line(
+                                surface, (255, 255, 255),
+                                (center[0] - 12, center[1]),
+                                (center[0] + 12, center[1]), width=3
+                            )
+                        else:
+                            pygame.draw.line(
+                                surface, (255, 255, 255),
+                                (center[0], center[1] - 12),
+                                (center[0], center[1] + 12), width=3
+                            )
 
                 if self.selected == (r, c):
                     sel_x = self.offset_x + c * TILE_SIZE
